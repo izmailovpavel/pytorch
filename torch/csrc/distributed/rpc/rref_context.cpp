@@ -7,14 +7,21 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+std::mutex RRefContext::destroyedMutex_;
+bool RRefContext::destroyed_ = false;
+
 RRefContext& RRefContext::getInstance() {
   // Leaky singleton to avoid module destructor races.
   static RRefContext* context = new RRefContext(RpcAgent::getDefaultRpcAgent());
   return *context;
 }
 
-void RRefContext::destroyInstance() {
-  RRefContext::getInstance().checkRRefLeaks();
+void RRefContext::destroyInstance(bool ignoreRRefLeak) {
+  {
+    std::lock_guard<std::mutex> lock(RRefContext::destroyedMutex_);
+    RRefContext::destroyed_ = true;
+  }
+  RRefContext::getInstance().checkRRefLeaks(ignoreRRefLeak);
 }
 
 void RRefContext::handleException(const Message& message) {
@@ -36,7 +43,7 @@ RRefContext::~RRefContext() {
   }
 }
 
-void RRefContext::checkRRefLeaks() {
+void RRefContext::checkRRefLeaks(bool ignoreRRefLeak) {
   if (!forks_.empty()) {
     std::stringstream ss;
     for (auto& entry : forks_) {
@@ -46,7 +53,19 @@ void RRefContext::checkRRefLeaks() {
            << std::endl;
       }
     }
-    AT_ERROR(ss.str());
+
+    if (ignoreRRefLeak) {
+      LOG(WARNING) << "Detected RRef Leaks during shutdown. This usually "
+          << "occurs when the application code still holds references to RRef "
+          << "instances when calling shutdown(). If the program has "
+          << "completed correctly and the process is exiting, it is OK to "
+          << "ignore these leaks. However, if you program will keep running "
+          << "after this, these leaks could result in memory leaks on RRef "
+          << "owners. Please make sure all RRefs are out of scope and Python "
+          << "GC has deleted them before calling shutdown(): \n" << ss.str();
+    } else {
+      AT_ERROR(ss.str());
+    }
   }
 }
 
@@ -95,6 +114,19 @@ template std::shared_ptr<UserRRef<py::object>> RRefContext::createUserRRef<
     worker_id_t ownerId,
     const RRefId& rrefId,
     const ForkId& forkId);
+
+void RRefContext::delUser(
+    const worker_id_t owner, const RRefId& rrefId, const ForkId& forkId) {
+  std::lock_guard<std::mutex> lock(destroyedMutex_);
+  if (!destroyed_) {
+    auto fm = agent_->send(
+        agent_->getWorkerInfo(owner),
+        RRefUserDelete(rrefId, forkId).toMessage());
+
+    fm->addCallback(
+        [](const Message& message) { RRefContext::handleException(message); });
+  }
+}
 
 template <typename T>
 std::shared_ptr<RRef> RRefContext::getOrCreateRRef(const RRefForkData& rfd) {

@@ -1104,6 +1104,50 @@ class RpcTest(RpcAgentTestFixture):
 
         self.assertEqual(result, sum(vals))
 
+    def _test_rref_leak(self, ignore_leak=False):
+        rpc.init_rpc(
+            name="worker{}".format(self.rank),
+            backend=self.rpc_backend,
+            init_method=self.init_method,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=self.rpc_backend_options,
+        )
+
+        # This is for the below `dist.barrier`.
+        # For `RpcAgent` other than `ProcessGroupAgent`,
+        # no `_default_pg` is initialized.
+        if not dist.is_initialized():
+            dist.init_process_group(
+                backend="gloo",
+                init_method=self.init_method,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
+        # Wait for all init to complete.
+        dist.barrier()
+
+        rref = rpc.remote(
+            "worker{}".format((self.rank + 1) % self.world_size),
+            torch.add,
+            args=(torch.ones(2, 2), 1)
+        )
+
+        if ignore_leak:
+            import torch.distributed.rpc.api as api
+            api._ignore_rref_leak = True
+
+        rpc.wait_all_workers()
+
+    @dist_init(setup_rpc=False)
+    def test_rref_leak(self):
+        with self.assertRaisesRegex(RuntimeError, "Leaking RRef"):
+            self._test_rref_leak()
+
+    @dist_init(setup_rpc=False)
+    def test_ignore_rref_leak(self):
+        self._test_rref_leak(ignore_leak=True)
+
     @dist_init(setup_rpc=False)
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_rpc_shutdown(self):
@@ -1115,7 +1159,7 @@ class RpcTest(RpcAgentTestFixture):
             rank=self.rank,
             world_size=self.world_size,
             init_method=self.init_method,
-            rpc_agent_options=self.rpc_agent_options,
+            rpc_backend_options=self.rpc_backend_options,
         )
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -1143,7 +1187,7 @@ class RpcTest(RpcAgentTestFixture):
             rank=self.rank,
             world_size=self.world_size,
             init_method=self.init_method,
-            rpc_agent_options=self.rpc_agent_options
+            rpc_backend_options=self.rpc_backend_options
         )
         rpc.wait_all_workers()
         rpc.shutdown()
