@@ -95,6 +95,10 @@ struct TORCH_API EmbeddingBagOptions {
   TORCH_ARG(bool, sparse) = false;
   /// The learnable weights of the module of shape (num_embeddings, embedding_dim)
   TORCH_ARG(torch::Tensor, _weight) = Tensor();
+  /// If ``True``, `offsets` has one additional element, where the last element
+  /// is equivalent to the size of `indices`. This matches the CSR format. Note:
+  /// this option is currently only supported when ``mode="sum"``.
+  TORCH_ARG(bool, new_offsets) = false;
 };
 
 // ============================================================================
@@ -144,6 +148,10 @@ struct TORCH_API EmbeddingBagFuncOptions {
   /// If specified, `per_sample_weights` must have exactly the same shape as input and is treated as
   /// having the same `offsets`, if those are not None.
   TORCH_ARG(torch::Tensor, per_sample_weights) = Tensor();
+  /// If ``True``, `offsets` has one additional element, where the last element
+  /// is equivalent to the size of `indices`. This matches the CSR format. Note:
+  /// this option is currently only supported when ``mode="sum"``.
+  TORCH_ARG(bool, new_offsets) = false;
 };
 
 } // namespace functional

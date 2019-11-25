@@ -206,6 +206,9 @@ class EmbeddingBag(Module):
         sparse (bool, optional): if ``True``, gradient w.r.t. :attr:`weight` matrix will be a sparse tensor. See
                                  Notes for more details regarding sparse gradients. Note: this option is not
                                  supported when ``mode="max"``.
+        new_offsets (bool, optional): if ``True``, :attr:`offsets` has one additional element, where the last element
+                                      is equivalent to the size of `indices`. This matches the CSR format. Note:
+                                      this option is currently only supported when ``mode="sum"``.
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape `(num_embeddings, embedding_dim)`
@@ -249,11 +252,11 @@ class EmbeddingBag(Module):
                 [ 1.1306, -2.5798, -1.0044]])
     """
     __constants__ = ['num_embeddings', 'embedding_dim', 'max_norm', 'norm_type',
-                     'scale_grad_by_freq', 'mode', 'sparse']
+                     'scale_grad_by_freq', 'mode', 'sparse', 'new_offsets']
 
     def __init__(self, num_embeddings, embedding_dim,
                  max_norm=None, norm_type=2., scale_grad_by_freq=False,
-                 mode='mean', sparse=False, _weight=None):
+                 mode='mean', sparse=False, _weight=None, new_offsets=False):
         super(EmbeddingBag, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
@@ -269,6 +272,7 @@ class EmbeddingBag(Module):
             self.weight = Parameter(_weight)
         self.mode = mode
         self.sparse = sparse
+        self.new_offsets = new_offsets
 
     def reset_parameters(self):
         init.normal_(self.weight)
@@ -278,7 +282,7 @@ class EmbeddingBag(Module):
         return F.embedding_bag(input, self.weight, offsets,
                                self.max_norm, self.norm_type,
                                self.scale_grad_by_freq, self.mode, self.sparse,
-                               per_sample_weights)
+                               per_sample_weights, self.new_offsets)
 
     def extra_repr(self):
         s = '{num_embeddings}, {embedding_dim}'
